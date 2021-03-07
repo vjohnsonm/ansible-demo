@@ -1,0 +1,7 @@
+--- # Master playbook for WebServers
+- name: Ansible Installation of httpd
+  hosts: webserver
+  become: yes
+  tasks:
+          - name: Intsall Apache on AMI
+            yum: pkg=httpd state=latest
