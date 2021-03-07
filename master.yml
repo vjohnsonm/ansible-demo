@@ -1,0 +1,8 @@
+--- # Master playbook for WebServers
+- name: Ansible Installation of httpd
+- hosts: hosts.inv
+  remote_user: ansible
+  become: yes
+  connection: ssh
+ - name: Intsall Apache on AMI
+   yum: pkg=httpd state=latest
