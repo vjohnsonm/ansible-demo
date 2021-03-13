@@ -1,0 +1,248 @@
+---
+  - name: Install and configure tomcat
+    hosts: webserver
+    gather_facts: false
+    vars:
+      req_java: java-1.8.0-openjdk
+      jdk_java: java-1.8.0-openjdk-devel.x86_64
+      set_java: jre-1.8.0-openjdk
+      req_tomcat_ver: 9.0.44
+      tomcat_url: http://mirrors.sonic.net/apache/tomcat/tomcat-{{req_tomcat_ver.split('.')[0]}}/v{{req_tomcat_ver}}/bin/apache-tomcat-{{req_tomcat_ver}}.tar.gz
+      http_port: 8080
+      https_port: 8080
+      maven_url: https://www-eu.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz
+      timestamp: "{{ ansible_date_time.date}}_{{ ansible_date_time.hour}}_{{ ansible_date_time.min}}"
+    become: yes
+    tasks:
+
+                
+      - name: Updating repos
+        yum:
+          name: "*"
+          state: latest
+
+      - name: Installing required java
+        yum:
+          name: "{{req_java}}"
+          state: present
+
+      - name: Installing required java
+        yum:
+          name: "{{jdk_java}}"
+          state: present
+      
+      - name: Add group "tomcat"
+        group: name=tomcat
+
+
+      - name: Add user "tomcat"
+        user: name=tomcat group=tomcat home=/opt/tomcat shell=/bin/false
+        become: True
+        become_method: sudo
+
+
+      
+      - name: Downloading required tomcat
+        get_url:
+          url: "{{tomcat_url}}"
+          dest: /usr/local
+
+
+
+      - name: Extracting downloaded tomcat
+        unarchive:
+          src: "/usr/local/apache-tomcat-{{req_tomcat_ver}}.tar.gz"
+          dest: /usr/local
+          remote_src: yes
+
+      - name: Renaming tocmcat home
+        command: mv /usr/local/apache-tomcat-{{req_tomcat_ver}} /opt/tomcat/
+
+
+      - name: Symlink install directory
+        file: src=/opt/tomcat/apache-tomcat-{{req_tomcat_ver}} path=/opt/tomcat/latest state=link
+
+
+      - name: Granting Permission on Tomcat folder
+        ansible.builtin.file:
+                path: /opt/tomcat
+                owner: tomcat
+                group: tomcat
+                mode: '0777'
+                recurse: yes
+
+
+      - name: Making bin directory executable opt/tomcat/latest/bin/*.sh
+        ansible.builtin.file:
+                path: /opt/tomcat/latest/bin
+                mode: '0777'
+      
+                #  - name: chnage permissions on the log files
+                #  ansible.builtin.file:
+                #    path: /opt/tomcat/latest/logs/
+                #   mode: '0777'
+                #  recurse: yes
+                #  become: True
+                #  become_method: sudo
+
+      - name: Replacing default port with required port
+        template:
+          src: server.xml.j2
+          dest: /opt/tomcat/latest/conf/server.xml
+
+      - name: Creating tomcat.service file which is a needed systemd file
+        copy:
+          src: tomcat.service
+          dest: /etc/systemd/system/
+          mode: 0755
+        become: True
+        become_method: sudo
+                  
+
+      - name: Daemon Reload
+        ansible.builtin.systemd:
+                daemon_reload: yes
+     
+
+
+                # - name: Install Tomcat init script
+                # copy: src=tomcat-init.sh dest=/etc/init.d/tomcat mode=0755          
+    
+
+
+      - name: Now Enabling And Start Tomcat
+        service:
+                name: tomcat
+                enabled: yes
+                state: started
+                daemon_reload: true
+        become: yes
+
+
+
+      - name: Install FirewallD
+        yum:
+                name: firewalld
+                state: present
+      
+      - name: Enable And Start FirewallD
+        service:
+                name: firewalld
+                enabled: yes
+                state: started
+      
+      
+      - name: Add http port and zone rule to firewalld
+        firewalld: port={{ http_port }}/tcp permanent=true state=enabled immediate=yes
+      
+      
+      - name: Add https port and zone rule to firewalld
+        firewalld: port={{ https_port }}/tcp permanent=true state=enabled immediate=yes
+      
+
+      - name: Ansible template modifications
+        template:
+                src: "{{ item.src }}"
+                dest: "{{ item.dest }}"
+                mode: 0777
+                backup: yes
+                owner: root
+                group: root
+        with_items:
+                - {src: context.xml ,dest: '/opt/tomcat/latest/webapps/manager/META-INF/'}
+                - {src: tomcat-users.xml, dest: '/opt/tomcat/latest/conf/'}
+                - {src: context.xml ,dest: '/opt/tomcat/latest/webapps/host-manager/META-INF/'}
+
+      - name: Starting tomcat
+        shell:  nohup /usr/local/latest/bin/startup.sh &
+
+
+      - name: Remove the Downloaded tar file
+        ansible.builtin.file:
+                path: /usr/local/apache-tomcat-{{req_tomcat_ver}}.tar.gz
+                state: absent
+
+
+      - name: Clone the Git Repository
+        git:
+                repo: https://github.com/vjohnsonm/Bookzy.git
+                dest: /usr/local/myproject
+                update: yes
+                version: main
+
+
+
+
+      - name: Downloading Maven package
+        get_url:
+          url: "{{maven_url}}"
+          dest: /usr/local
+
+
+      - name: Extracting downloaded maven archive
+        unarchive:
+          src: "/usr/local/apache-maven-3.6.3-bin.tar.gz"
+          dest: /usr/local
+          remote_src: yes
+
+      
+
+      - name: Update path for maven use
+        shell: export PATH=/usr/local/apache-maven-3.6.3/bin:$PATH
+
+      - name: Update source
+        shell: source /etc/profile
+
+
+      - name: Packaging the war file using the maven build
+        command: mvn -f /usr/local/myproject/pom.xml clean package
+        args:
+                chdir: /usr/local/myproject
+
+      - name: Print the timestamp variable
+        debug:
+                msg: The current timestamp is  {{ lookup('pipe','date +%Y-%m-%d-%H-%M-%S') }}
+
+
+      - name: Find out bookzy app is already existing on the tomcat server webapps folder
+        stat:
+                path: /opt/tomcat/latest/webapps/bookzy
+        register: artifact_stat
+
+
+      - name: Archive bookzy dir with timestamp
+        archive:
+                path: /opt/tomcat/latest/webapps/ROOT
+                dest: "/opt/bookzy_{{ lookup('pipe','date +%Y-%m-%d-%H-%M') }}.tgz"
+        when: artifact_stat.stat.exists
+        register: archive_info
+
+
+      - name: Delete the current artifact
+        file:
+                path: /usr/local/tomcat/webapps/bookzy
+                state: absent
+        when: archive_info.changed
+
+      - name: Deploy newest build artifact war into the tomcat server
+        copy:
+                src: /usr/local/myproject/target/webapp-0.0.1-SNAPSHOT.war
+                dest: /opt/tomcat/latest/webapps/bookzy.war
+                owner: tomcat
+                group: tomcat
+                mode: 0777
+                remote_src: yes
+        register: deploy_info
+
+
+      - name: Granting all permissoins to webapps folder
+        ansible.builtin.file:
+                path: /opt/tomcat/latest/webapps
+                mode: '0777'
+
+
+      - name: Restart TomCat Service
+        service:
+                name: tomcat
+                state: restarted
+        when: deploy_info.changed

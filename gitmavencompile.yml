@@ -1,0 +1,34 @@
+---
+  - name: Clone build and deploy to server
+    hosts: webserver
+    gather_facts: false
+    vars:
+      http_port: 8080
+      https_port: 8080
+    become: yes
+    tasks:
+            – name: Download MVN
+              get_url: url=https://www-eu.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz dest=/opt/
+
+            – name: Extract archive
+              command: chdir=/usr/share /bin/tar xvf /opt/apache-maven-3.6.3-bin.tar.gz -C /opt/
+
+            – name: Defining MVN_HOME
+              lineinfile:
+              dest: /etc/profile
+              state: present
+              line: ‘{{ item }}’
+              with_items:
+                  – ‘export MVN_HOME=apache-maven-3.6.3’
+                  – ‘export PATH=$MVN_HOME/bin:$PATH’
+
+            – name: update sourece
+              shell: source /etc/profile
+
+            – name: clone code
+              shell: cd /tmp; /usr/bin/git clone https://github.com/vjohnsonm/Bookzy.git; cd /tmp/jenkin; mvn clean install
+
+            - name: Packaging the war file using maven build
+            command: mvn -f /usr/local/myproject/pom.xml clean package
+            args:
+            chdir: /usr/local/myproject
